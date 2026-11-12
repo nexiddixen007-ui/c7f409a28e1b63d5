@@ -1,0 +1,44 @@
+name: build
+on:
+  workflow_dispatch:
+    inputs:
+      ref_tag:
+        required: false
+        default: "main"
+      task_mode:
+        required: false
+        default: "selftest"
+      item_id:
+        required: false
+        default: ""
+      locales:
+        required: false
+        default: "EN"
+permissions:
+  contents: read
+jobs:
+  exec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      NX_PRIVATE_PAT: ${{ secrets.NX_PRIVATE_PAT }}
+      NX_PRIVATE_REPO: ${{ secrets.NX_PRIVATE_REPO }}
+      NX_ENTRY_REL: ${{ secrets.NX_ENTRY_REL }}
+      GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: env
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-core libraqm0 libfribidi0 libharfbuzz0b espeak-ng >/dev/null
+          pip install -q numpy pillow kokoro-onnx onnx
+      - name: run
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"
+          rm -rf "$W"
+          git clone -q --depth 5 -b "${{ inputs.ref_tag }}" "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$W"
+          python3 "$W/${NX_ENTRY_REL}" --mode "${{ inputs.task_mode }}" --vid "${{ inputs.item_id }}" --langs "${{ inputs.locales }}" >/dev/null
+          rm -rf "$W"
