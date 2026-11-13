@@ -16,6 +16,10 @@ on:
         default: "EN"
 permissions:
   contents: read
+# One run per (mode, item, locale) at a time: a duplicate dispatch waits instead of rendering in parallel.
+concurrency:
+  group: build-${{ inputs.task_mode }}-${{ inputs.item_id }}-${{ inputs.locales }}
+  cancel-in-progress: false
 jobs:
   exec:
     runs-on: ubuntu-latest
@@ -26,18 +30,44 @@ jobs:
       NX_ENTRY_REL: ${{ secrets.NX_ENTRY_REL }}
       GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
     steps:
+      # A fitness render whose inputs have not changed since its last pushed master is a duplicate:
+      # skip it green, push nothing, so a dispatcher that reacts to branch pushes cannot loop.
+      - name: skip if already rendered
+        id: dedupe
+        run: |
+          set -uo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          M="${{ inputs.task_mode }}"; V="${{ inputs.item_id }}"; L="${{ inputs.locales }}"
+          if [ "$M" != "fitness_full" ] || [ -z "$V" ] || [ -z "$L" ] || [[ "$L" == *,* ]]; then exit 0; fi
+          G="$RUNNER_TEMP/g"; rm -rf "$G"
+          git clone -q --filter=blob:none --no-checkout --depth 300 -b "${{ inputs.ref_tag }}" \
+            "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$G" || exit 0
+          LAST=$(git -C "$G" log -1 --format=%H -E --grep="^ci\(fitness\): ${V} [A-Z,]*${L}" || true)
+          SRC=$(git -C "$G" log -1 --format=%H --invert-grep -E --grep='^(ci|vault)\(' -- "videos/${V}" \
+            ":(exclude)videos/${V}/out" ":(exclude)videos/${V}/qc_out" ":(exclude)videos/${V}/ci_logs" \
+            engines tools/stealth_public_runner_entry.py || true)
+          if [ -n "$LAST" ] && [ -n "$SRC" ] && git -C "$G" merge-base --is-ancestor "$SRC" "$LAST"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${V} ${L} already rendered at ${LAST:0:8} from inputs ${SRC:0:8}; nothing changed, skipping"
+          fi
+          rm -rf "$G"
+          exit 0
       - uses: actions/setup-node@v4
+        if: steps.dedupe.outputs.skip != 'true'
         with:
           node-version: "20"
       - uses: actions/setup-python@v5
+        if: steps.dedupe.outputs.skip != 'true'
         with:
           python-version: "3.11"
       - name: env
+        if: steps.dedupe.outputs.skip != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-core fonts-noto-ui-core libraqm0 libfribidi0 libharfbuzz0b espeak-ng >/dev/null
           pip install -q numpy pillow kokoro-onnx onnx
       - name: run
+        if: steps.dedupe.outputs.skip != 'true'
         run: |
           set -euo pipefail
           W="$RUNNER_TEMP/w"
