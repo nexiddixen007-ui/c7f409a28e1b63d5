@@ -1,0 +1,50 @@
+name: Pipeline B2 - 2D3D War Dubs (Dedicated GitHub Dub Queue)
+on:
+  workflow_dispatch:
+    inputs:
+      ref_tag:
+        required: false
+        default: "main"
+      item_id:
+        required: true
+      locales:
+        required: false
+        default: "HI,TA"
+permissions:
+  contents: read
+concurrency:
+  group: war-2d3d-dubs-${{ inputs.item_id }}-${{ inputs.locales }}
+  cancel-in-progress: false
+jobs:
+  war_dubs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NX_PRIVATE_PAT: ${{ secrets.NX_PRIVATE_PAT }}
+      NX_PRIVATE_REPO: ${{ secrets.NX_PRIVATE_REPO }}
+      NX_ENTRY_REL: ${{ secrets.NX_ENTRY_REL }}
+      GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+    steps:
+      - name: CAT70 Strict Pipeline Isolation Gate (AEF-* Dubs Only — Zero 3D / Zero Fitness)
+        run: |
+          VID="${{ inputs.item_id }}"
+          if [[ "${VID^^}" != AEF-* ]]; then
+            echo "::error::[CAT70] pipeline-war-2d3d-dubs.yml strictly accepts AEF-* (2d3d_war) dubs only (got $VID)"
+            exit 44
+          fi
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Lightweight Dubbing Env (Zero Blender / Zero Chromium Overhead)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-core fonts-noto-ui-core libraqm0 libfribidi0 libharfbuzz0b >/dev/null
+          pip install -q numpy pillow soundfile scipy
+      - name: run
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"
+          rm -rf "$W"
+          git clone -q --depth 5 -b "${{ inputs.ref_tag }}" "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$W"
+          python3 "$W/${NX_ENTRY_REL}" --mode "war_dubs" --vid "${{ inputs.item_id }}" --langs "${{ inputs.locales }}"
+          rm -rf "$W"

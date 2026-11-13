@@ -1,0 +1,53 @@
+name: Pipeline C2 - Fitness Dubs TA (Dedicated GitHub Dub Queue)
+on:
+  workflow_dispatch:
+    inputs:
+      ref_tag:
+        required: false
+        default: "main"
+      item_id:
+        required: true
+      locales:
+        required: false
+        default: "TA"
+permissions:
+  contents: read
+concurrency:
+  group: fitness-dubs-ta-${{ inputs.item_id }}-${{ inputs.locales }}
+  cancel-in-progress: false
+jobs:
+  fitness_dub_ta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NX_PRIVATE_PAT: ${{ secrets.NX_PRIVATE_PAT }}
+      NX_PRIVATE_REPO: ${{ secrets.NX_PRIVATE_REPO }}
+      NX_ENTRY_REL: ${{ secrets.NX_ENTRY_REL }}
+      GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+    steps:
+      - name: CAT70 Strict Pipeline Isolation Gate (FIT-* TA Dub Only — Zero 3D / Zero War)
+        run: |
+          VID="${{ inputs.item_id }}"
+          if [[ "${VID^^}" != FIT-* ]]; then
+            echo "::error::[CAT70] pipeline-fitness-dubs.yml strictly accepts FIT-* (fitness_study) TA dubs only (got $VID)"
+            exit 44
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: env
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-core fonts-noto-ui-core libraqm0 libfribidi0 libharfbuzz0b >/dev/null
+          pip install -q numpy pillow soundfile
+      - name: run
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"
+          rm -rf "$W"
+          git clone -q --depth 5 -b "${{ inputs.ref_tag }}" "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$W"
+          python3 "$W/${NX_ENTRY_REL}" --mode "fitness_dub_ta" --vid "${{ inputs.item_id }}" --langs "TA"
+          rm -rf "$W"

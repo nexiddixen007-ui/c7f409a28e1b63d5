@@ -1,0 +1,75 @@
+name: Pipeline C1 - Fitness Render EN (Dedicated Queue)
+on:
+  workflow_dispatch:
+    inputs:
+      ref_tag:
+        required: false
+        default: "main"
+      item_id:
+        required: true
+      locales:
+        required: false
+        default: "EN"
+permissions:
+  contents: read
+concurrency:
+  group: fitness-render-en-${{ inputs.item_id }}
+  cancel-in-progress: false
+jobs:
+  fitness_render_en:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      NX_PRIVATE_PAT: ${{ secrets.NX_PRIVATE_PAT }}
+      NX_PRIVATE_REPO: ${{ secrets.NX_PRIVATE_REPO }}
+      NX_ENTRY_REL: ${{ secrets.NX_ENTRY_REL }}
+      GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+    steps:
+      - name: CAT70 Strict Pipeline Isolation Gate (FIT-* EN Only)
+        run: |
+          VID="${{ inputs.item_id }}"
+          if [[ "${VID^^}" != FIT-* ]]; then
+            echo "::error::[CAT70] pipeline-fitness-render.yml strictly accepts FIT-* (fitness_study) only (got $VID)"
+            exit 44
+          fi
+      - name: skip if already rendered
+        id: dedupe
+        run: |
+          set -uo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          V="${{ inputs.item_id }}"; L="EN"
+          G="$RUNNER_TEMP/g"; rm -rf "$G"
+          git clone -q --filter=blob:none --no-checkout --depth 300 -b "${{ inputs.ref_tag }}" \
+            "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$G" || exit 0
+          LAST=$(git -C "$G" log -1 --format=%H -E --grep="^ci\(fitness\): ${V} [A-Z,]*${L}" || true)
+          SRC=$(git -C "$G" log -1 --format=%H --invert-grep -E --grep='^(ci|vault)\(' -- "videos/${V}" \
+            ":(exclude)videos/${V}/out" ":(exclude)videos/${V}/qc_out" ":(exclude)videos/${V}/ci_logs" \
+            engines tools/stealth_public_runner_entry.py || true)
+          if [ -n "$LAST" ] && [ -n "$SRC" ] && git -C "$G" merge-base --is-ancestor "$SRC" "$LAST"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${V} EN already rendered at ${LAST:0:8}; skipping"
+          fi
+          rm -rf "$G"
+      - uses: actions/setup-node@v4
+        if: steps.dedupe.outputs.skip != 'true'
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        if: steps.dedupe.outputs.skip != 'true'
+        with:
+          python-version: "3.11"
+      - name: env
+        if: steps.dedupe.outputs.skip != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-inter fonts-noto-core fonts-noto-ui-core libraqm0 libfribidi0 libharfbuzz0b espeak-ng >/dev/null
+          pip install -q numpy pillow kokoro-onnx onnx
+      - name: run
+        if: steps.dedupe.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/w"
+          rm -rf "$W"
+          git clone -q --depth 5 -b "${{ inputs.ref_tag }}" "https://x-access-token:${NX_PRIVATE_PAT}@github.com/${NX_PRIVATE_REPO}.git" "$W"
+          python3 "$W/${NX_ENTRY_REL}" --mode "fitness_full" --vid "${{ inputs.item_id }}" --langs "EN"
+          rm -rf "$W"
